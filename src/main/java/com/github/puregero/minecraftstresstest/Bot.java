@@ -14,7 +14,7 @@ import java.util.function.Consumer;
 
 
 public class Bot extends ChannelInboundHandlerAdapter {
-    private static final int PROTOCOL_VERSION = Integer.parseInt(System.getProperty("bot.protocol.version", "767")); // 767 is 1.21 https://wiki.vg/Protocol_version_numbers
+    private static final int PROTOCOL_VERSION = Integer.parseInt(System.getProperty("bot.protocol.version", "774")); // 774 is 1.21.11 https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol_version_numbers
     private static final double CENTER_X = Double.parseDouble(System.getProperty("bot.x", "0"));
     private static final double CENTER_Z = Double.parseDouble(System.getProperty("bot.z", "0"));
     private static final boolean LOGS = Boolean.parseBoolean(System.getProperty("bot.logs", "true"));
@@ -164,6 +164,7 @@ public class Bot extends ChannelInboundHandlerAdapter {
                     buffer.writeVarInt(0);
                     buffer.writeBoolean(false);
                     buffer.writeBoolean(true);
+                    buffer.writeVarInt(0);
                 });
 
                 sendPacket(ctx, PacketIds.Serverbound.Configuration.KNOWN_PACKS, buffer -> {
@@ -277,13 +278,16 @@ public class Bot extends ChannelInboundHandlerAdapter {
 
         } else if (packetId == PacketIds.Clientbound.Play.SYNCHRONIZE_PLAYER_POSITION) {
 
+            int id = byteBuf.readVarInt();
             double dx = byteBuf.readDouble();
             double dy = byteBuf.readDouble();
             double dz = byteBuf.readDouble();
+            double velocityX = byteBuf.readDouble();
+            double velocityY = byteBuf.readDouble();
+            double velocityZ = byteBuf.readDouble();
             float dyaw = byteBuf.readFloat();
             float dpitch = byteBuf.readFloat();
             byte flags = byteBuf.readByte();
-            int id = byteBuf.readVarInt();
 
             x = (flags & 0x01) == 0x01 ? x + dx : dx;
             y = (flags & 0x02) == 0x02 ? y + dy : dy;
