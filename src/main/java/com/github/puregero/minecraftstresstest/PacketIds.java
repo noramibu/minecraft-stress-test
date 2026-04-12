@@ -36,11 +36,11 @@ public final class PacketIds {
 
             //client outbound
             public static final int
-                    DISCONNECT = 0x20,
-                    KEEP_ALIVE = 0x2B,
-                    PING = 0x3B,
-                    SYNCHRONIZE_PLAYER_POSITION = 0x46,
-                    RESOURCE_PACK = 0x4F,
+                    DISCONNECT = 0x1A,
+                    KEEP_ALIVE = 0x2C,
+                    PING = 0x3D,
+                    SYNCHRONIZE_PLAYER_POSITION = 0x48,
+                    RESOURCE_PACK = 0x51,
                     SET_HEALTH = 0x66;
         }
 
@@ -85,11 +85,11 @@ public final class PacketIds {
 
             public static final int
                     CONFIRM_TELEPORTATION = 0x00,
-                    CLIENT_RESPAWN = 0x0B,
-                    KEEP_ALIVE = 0x1B,
-                    SET_PLAYER_POSITION_AND_ROTATION = 0x1E,
-                    PONG = 0x2C,
-                    RESOURCE_PACK = 0x30;
+                    CLIENT_COMMAND = 0x0C,
+                    KEEP_ALIVE = 0x1C,
+                    SET_PLAYER_POSITION_AND_ROTATION = 0x1F,
+                    PONG = 0x2D,
+                    RESOURCE_PACK = 0x31;
         }
 
     }

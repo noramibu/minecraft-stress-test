@@ -14,7 +14,7 @@ import java.util.function.Consumer;
 
 
 public class Bot extends ChannelInboundHandlerAdapter {
-    private static final int PROTOCOL_VERSION = Integer.parseInt(System.getProperty("bot.protocol.version", "774")); // 774 is 1.21.11 https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol_version_numbers
+    private static final int PROTOCOL_VERSION = Integer.parseInt(System.getProperty("bot.protocol.version", "775")); // 775 is 26.1 https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol_version_numbers
     private static final double CENTER_X = Double.parseDouble(System.getProperty("bot.x", "0"));
     private static final double CENTER_Z = Double.parseDouble(System.getProperty("bot.z", "0"));
     private static final boolean LOGS = Boolean.parseBoolean(System.getProperty("bot.logs", "true"));
@@ -315,6 +315,7 @@ public class Bot extends ChannelInboundHandlerAdapter {
 
         } else if (packetId == PacketIds.Clientbound.Play.RESOURCE_PACK) {
 
+            UUID uuid = byteBuf.readUUID();
             String url = byteBuf.readUtf();
             String hash = byteBuf.readUtf();
             boolean forced = byteBuf.readBoolean();
@@ -322,14 +323,17 @@ public class Bot extends ChannelInboundHandlerAdapter {
             if (byteBuf.readBoolean()) message = byteBuf.readUtf();
             System.out.println("Resource pack info:\n" + url + "\n" + hash + "\n" + forced + "\n" + message);
 
-            sendPacket(ctx, PacketIds.Serverbound.Play.RESOURCE_PACK, buffer -> buffer.writeVarInt(RESOURCE_PACK_RESPONSE));
+            sendPacket(ctx, PacketIds.Serverbound.Play.RESOURCE_PACK, buffer -> {
+                buffer.writeUUID(uuid);
+                buffer.writeVarInt(RESOURCE_PACK_RESPONSE);
+            });
 
         } else if (packetId == PacketIds.Clientbound.Play.SET_HEALTH) {
 
             float health = byteBuf.readFloat();
 
             if (health <= 0) {
-                sendPacket(ctx, PacketIds.Serverbound.Play.CLIENT_RESPAWN, buffer -> buffer.writeVarInt(0));
+                sendPacket(ctx, PacketIds.Serverbound.Play.CLIENT_COMMAND, buffer -> buffer.writeVarInt(0)); // RESPAWN
             }
         }
     }
