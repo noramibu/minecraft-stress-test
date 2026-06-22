@@ -8,26 +8,15 @@ import io.netty.channel.socket.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 
 public class Bot extends ChannelInboundHandlerAdapter {
     private static final int PROTOCOL_VERSION = Integer.parseInt(System.getProperty("bot.protocol.version", "775")); // 775 is 26.1 https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol_version_numbers
-    private static final double CENTER_X = Double.parseDouble(System.getProperty("bot.x", "0"));
-    private static final double CENTER_Z = Double.parseDouble(System.getProperty("bot.z", "0"));
     private static final boolean LOGS = Boolean.parseBoolean(System.getProperty("bot.logs", "true"));
-    private static final boolean Y_AXIS = Boolean.parseBoolean(System.getProperty("bot.yaxis", "true"));
     private static final int VIEW_DISTANCE = Integer.parseInt(System.getProperty("bot.viewdistance", "2"));
     private static final int RESOURCE_PACK_RESPONSE = Integer.parseInt(System.getProperty("bot.resource.pack.response", "3"));
-
-    private static final Executor ONE_TICK_DELAY = CompletableFuture.delayedExecutor(50, TimeUnit.MILLISECONDS);
-
-    public static final String DEFAULT_SPEED = "0.1";
-    public static double SPEED = Double.parseDouble(System.getProperty("bot.speed", DEFAULT_SPEED));
-    public static final String DEFAULT_RADIUS = "1000";
-    public static double RADIUS = Double.parseDouble(System.getProperty("bot.radius", DEFAULT_RADIUS));
 
     public SocketChannel channel;
     private String username;
@@ -41,11 +30,9 @@ public class Bot extends ChannelInboundHandlerAdapter {
     private double x = 0;
     private double y = 0;
     private double z = 0;
-    private float yaw = (float) (Math.random() * 360);
 
-    private boolean goUp = false;
-    private boolean goDown = false;
     private boolean isSpawned = false;
+    private boolean scheduledSpread = false;
 
     public Bot(String username, String address, int port) {
         this.username = username;
@@ -73,6 +60,7 @@ public class Bot extends ChannelInboundHandlerAdapter {
         if (uuid != null) {
             System.out.println(username + " has disconnected from " + address + ":" + port);
         }
+        MinecraftStressTest.scheduleReconnect(this);
     }
 
     @Override
@@ -171,63 +159,16 @@ public class Bot extends ChannelInboundHandlerAdapter {
                     buffer.writeVarInt(0);
                 });
             }
-
-            CompletableFuture.delayedExecutor(1000, TimeUnit.MILLISECONDS).execute(() -> tick(ctx));
         });
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        cause.printStackTrace();
+        if (!isConnectionReset(cause)) {
+            cause.printStackTrace();
+        }
         ctx.close();
     }
-
-
-    private void tick(ChannelHandlerContext ctx) {
-
-        if (!ctx.channel().isActive()) return;
-
-        ONE_TICK_DELAY.execute(() -> tick(ctx));
-
-        if (!isSpawned) return; // Don't tick until we've spawned in
-
-        if (!Y_AXIS && (goUp || goDown)) {
-            goDown = goUp = false;
-            if (Math.random() < 0.1) yaw = (float) (Math.random() * 360);
-        }
-
-        if (goUp) {
-            y += 0.1;
-            goUp = Math.random() < 0.98;
-        } else if (goDown) {
-            y -= 0.1;
-            goDown = Math.random() < 0.98;
-        } else {
-            if (Math.max(Math.abs(x - CENTER_X), Math.abs(z - CENTER_Z)) > RADIUS) {
-                double tx = Math.random() * RADIUS * 2 - RADIUS + CENTER_X;
-                double tz = Math.random() * RADIUS * 2 - RADIUS + CENTER_Z;
-
-                yaw = (float) Math.toDegrees(Math.atan2(x - tx, tz - z));
-            }
-
-            x += SPEED * -Math.sin(Math.toRadians(yaw));
-            z += SPEED * Math.cos(Math.toRadians(yaw));
-        }
-
-        if (Y_AXIS) {
-            y -= SPEED / 10;
-        }
-
-        sendPacket(ctx, PacketIds.Serverbound.Play.SET_PLAYER_POSITION_AND_ROTATION, buffer -> {
-            buffer.writeDouble(x);
-            buffer.writeDouble(y);
-            buffer.writeDouble(z);
-            buffer.writeFloat(yaw);
-            buffer.writeFloat(0);
-            buffer.writeBoolean(true);
-        });
-    }
-
 
     private void channelReadConfig(ChannelHandlerContext ctx, FriendlyByteBuf byteBuf) {
         int packetId = byteBuf.readVarInt();
@@ -243,6 +184,7 @@ public class Bot extends ChannelInboundHandlerAdapter {
 
             configState = false;
             playState = true;
+            scheduleSpreadIfNeeded();
             //System.out.println("changing to play mode");
 
         } else if (packetId == PacketIds.Clientbound.Configuration.KEEP_ALIVE) {
@@ -277,6 +219,9 @@ public class Bot extends ChannelInboundHandlerAdapter {
             sendPacket(ctx, PacketIds.Serverbound.Play.PONG, buffer -> buffer.writeInt(id));
 
         } else if (packetId == PacketIds.Clientbound.Play.SYNCHRONIZE_PLAYER_POSITION) {
+            if (byteBuf.readableBytes() < 58) {
+                return;
+            }
 
             int id = byteBuf.readVarInt();
             double dx = byteBuf.readDouble();
@@ -294,19 +239,7 @@ public class Bot extends ChannelInboundHandlerAdapter {
             z = (flags & 0x04) == 0x04 ? z + dz : dz;
 
             if (LOGS) {
-                System.out.println("Teleporting " + username + " to " + x + "," + y + "," + z);
-            }
-
-            // Try going up to go over the block, or turn around and go a different way
-            if (goDown) {
-                goDown = false;
-            } else if (!goUp) {
-                goUp = true;
-            } else {
-                // We hit our head on something
-                goUp = false;
-                goDown = Math.random() < 0.5;
-                if (!goDown) yaw = (float) (Math.random() * 360);
+                System.out.println(username + " is at " + x + "," + y + "," + z);
             }
 
             sendPacket(ctx, PacketIds.Serverbound.Play.CONFIRM_TELEPORTATION, buffer -> buffer.writeVarInt(id));
@@ -314,6 +247,9 @@ public class Bot extends ChannelInboundHandlerAdapter {
             isSpawned = true;
 
         } else if (packetId == PacketIds.Clientbound.Play.RESOURCE_PACK) {
+            if (byteBuf.readableBytes() < 17) {
+                return;
+            }
 
             UUID uuid = byteBuf.readUUID();
             String url = byteBuf.readUtf();
@@ -329,6 +265,9 @@ public class Bot extends ChannelInboundHandlerAdapter {
             });
 
         } else if (packetId == PacketIds.Clientbound.Play.SET_HEALTH) {
+            if (byteBuf.readableBytes() < 4) {
+                return;
+            }
 
             float health = byteBuf.readFloat();
 
@@ -343,11 +282,52 @@ public class Bot extends ChannelInboundHandlerAdapter {
         channel.close();
     }
 
+    public String getUsername() {
+        return username;
+    }
+
+    public boolean sendTeleportCommand(double targetX, double targetZ) {
+        if (channel == null || !channel.isActive() || !playState) {
+            return false;
+        }
+
+        String command = "tp " + username + " " + formatCoordinate(targetX) + " ~ " + formatCoordinate(targetZ);
+        sendPacket(PacketIds.Serverbound.Play.CHAT_COMMAND, buffer -> buffer.writeUtf(command));
+        return true;
+    }
+
+    private void scheduleSpreadIfNeeded() {
+        if (scheduledSpread) {
+            return;
+        }
+
+        scheduledSpread = true;
+        MinecraftStressTest.scheduleSpreadForBot(this);
+    }
+
+    private boolean isConnectionReset(Throwable cause) {
+        return cause.getMessage() != null && cause.getMessage().contains("Connection reset");
+    }
+
+    private String formatCoordinate(double coordinate) {
+        if (coordinate == (long) coordinate) {
+            return Long.toString((long) coordinate);
+        }
+
+        return Double.toString(coordinate);
+    }
 
     public void sendPacket(ChannelHandlerContext ctx, int packetId, Consumer<FriendlyByteBuf> applyToBuffer) {
         FriendlyByteBuf buffer = new FriendlyByteBuf(ctx.alloc().buffer());
         buffer.writeVarInt(packetId);
         applyToBuffer.accept(buffer);
         ctx.writeAndFlush(buffer);
+    }
+
+    private void sendPacket(int packetId, Consumer<FriendlyByteBuf> applyToBuffer) {
+        FriendlyByteBuf buffer = new FriendlyByteBuf(channel.alloc().buffer());
+        buffer.writeVarInt(packetId);
+        applyToBuffer.accept(buffer);
+        channel.writeAndFlush(buffer);
     }
 }
